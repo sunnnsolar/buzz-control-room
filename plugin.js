@@ -200,11 +200,12 @@ function buildTiles(d) {
     title: "Waiting on James",
     href: CRM + "/inbox",
     wide: true,
-    today: D || E ? num(total) : "–",
+    // Only add up when both sources were read; a partial sum would be a guess.
+    today: D && E ? num(total) : "–",
     todayLabel: "now",
     tone: total > 0 ? "warn" : "good",
     linkLines: lines,
-    source: "CRM drafts ready for his tap and the inbox sorter's ledger on this Mac (reply drafts it left in James's Gmail in the last 7 days that it has not seen him answer). " + (crm ? read : "") + (E ? ", ledger read " + clock(E.read_at) : ""),
+    source: "CRM drafts ready for his tap and the inbox sorter's ledger on this Mac (reply drafts it left in James's Gmail in the last 7 days that it has not seen him answer). " + [crm ? read : null, E ? "ledger read " + clock(E.read_at) : null].filter(Boolean).join(", ") + ".",
   });
 
   return tiles;
