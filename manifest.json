@@ -3,7 +3,14 @@
   "name": "Control room",
   "apiVersion": 1,
   "description": "How Sunnn is going today and over 7 days: leads, speed to call, calls, bookings, meetings, proposals, signed, installs and what waits on James. Read only.",
-  "discovery": { "category": "productivity", "tags": ["sunnn", "dashboard", "crm"] },
+  "discovery": {
+    "category": "productivity",
+    "tags": [
+      "sunnn",
+      "dashboard",
+      "crm"
+    ]
+  },
   "host": {
     "commands": [
       {
@@ -11,7 +18,10 @@
         "program": "sunnn-control-room-read",
         "args": [],
         "maxOutputBytes": 262144,
-        "artifact": { "path": "~/.buzz/bin/sunnn-control-room-read", "sha256": "4b4800c543c8851b0baf8cc703c1e2059e2ed8303f8f2bed6232a67571c2ee2b" }
+        "artifact": {
+          "path": "~/.buzz/bin/sunnn-control-room-read-2",
+          "sha256": "657953752e5babcf4ea255ac0ca77b80b1a7d45dd9d60e039eab7eda4d2e3ff9"
+        }
       }
     ]
   }

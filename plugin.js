@@ -43,6 +43,15 @@ function minutes(v) {
   const m = Math.round(v - h * 60);
   return h + " h" + (m ? " " + m + " min" : "");
 }
+function seconds(v) {
+  if (typeof v !== "number" || !isFinite(v)) return "–";
+  if (v < 120) return Math.round(v) + " s";
+  return minutes(v / 60);
+}
+function hours(v) {
+  if (typeof v !== "number" || !isFinite(v)) return "–";
+  return (v < 24 ? v.toFixed(1) : Math.round(v)) + " h";
+}
 function clock(iso) {
   if (!iso) return "";
   const d = new Date(iso);
@@ -67,7 +76,7 @@ function buildTiles(d) {
   const tiles = [];
 
   if (!crm) {
-    ["New leads", "Minutes to first call", "Calls made", "10-minute calls booked", "PV Designs booked", "PV meetings held", "Proposals sent", "Signed"].forEach((t) =>
+    ["New leads", "Speed to first call", "Calls made", "10-minute calls booked", "PV Designs booked", "PV meetings held", "Proposals sent", "Signed"].forEach((t) =>
       tiles.push(missing(t, CRM + "/reports")),
     );
   } else {
@@ -79,29 +88,38 @@ function buildTiles(d) {
       today: num(L.today),
       week: num(L.week),
       lines: [src ? "7 days: " + src : null],
-      source: "CRM contacts added (new CRM records). Left out: " + num(L.excluded_cold_imports_week) + " cold-list imports and " + num(L.excluded_recruits_week) + " job applicants this week, tests and merged duplicates. " + read,
+      source: "New contacts added to the CRM. Left out: " + num(L.excluded_cold_imports_week) + " cold-list imports and " + num(L.excluded_recruits_week) + " job applicants this week, tests and merged duplicates. A past customer who enquires again is not a new contact, so is not counted. " + read,
     });
 
     const S = crm.speed || {};
-    const waiting = (S.today_not_called || 0);
+    const St = S.today || {};
+    const Sw = S.week || {};
+    const badT = (St.in_late || 0) + (St.in_not_called || 0);
+    const badW = (Sw.in_late || 0) + (Sw.in_not_called || 0);
     tiles.push({
-      title: "Minutes to first call",
+      title: "Speed to first call",
       href: CRM + "/reports",
-      today: minutes(S.today_median_min),
-      week: minutes(S.week_median_min),
-      tone: waiting > 0 ? "warn" : null,
+      today: seconds(St.in_med_s),
+      week: seconds(Sw.in_med_s),
+      todayLabel: "today, open hours",
+      weekLabel: "7 days, open hours",
+      tone: badT > 0 ? "warn" : null,
       lines: [
-        "Today: " + num(S.today_called) + " called, " + num(waiting) + " not called yet",
-        "7 days: " + num(S.week_within_5) + " of " + num((S.week_called || 0) + (S.week_not_called || 0)) + " called inside 5 min, " + num(S.week_not_called) + " never called",
+        "Arrived while calling is allowed: today " + num(St.in_60) + " of " + num(St.in_n) + " rung within 60 s, 7 days " + num(Sw.in_60) + " of " + num(Sw.in_n),
+        { text: "Rung later than 60 s or not rung: today " + num(badT) + ", 7 days " + num(badW), tone: badW > 0 ? "warn" : null },
+        "Arrived while calling is not allowed (nights, Sundays): today " + num(St.out_n) + ", 7 days " + num(Sw.out_n) + ". Of the 7 days: " +
+          num(Sw.out_called) + " rung when calling opened (typical wait " + hours(Sw.out_med_wait_h) + "), " +
+          num(Sw.out_self) + " booked their own call by text first, " + num(Sw.out_waiting) + " still waiting",
       ],
-      source: "Median from lead added to first outbound dial (Mia or a person) in the CRM dialer log. Leads not called yet are not in the median. " + read,
+      source: "Facebook leads only (hand-entered contacts and Sunnn+ sign-ups are not ad leads). Big number = typical (median) time from the lead arriving to the first call by Mia or a person, for leads that arrived inside legal calling hours. Calling hours = weekdays 9am to 8pm, Saturday 9am to 5pm, never Sunday, in Sydney time; public holidays and other states' time zones are not counted in. " + read,
     });
 
     const C = crm.calls || {};
-    const row = (k, label) => {
-      const t = (C.today || {})[k] || { dials: 0, conv: 0 };
-      const w = (C.week || {})[k] || { dials: 0, conv: 0 };
-      return label + ": " + num(t.dials) + " today (" + num(t.conv) + " talks), " + num(w.dials) + " in 7 days (" + num(w.conv) + " talks)";
+    const row = (k, label, picked) => {
+      const t = (C.today || {})[k] || { dials: 0, min1: 0, picked: 0 };
+      const w = (C.week || {})[k] || { dials: 0, min1: 0, picked: 0 };
+      return label + ": today " + num(t.dials) + " dials, " + num(t.min1) + " of 1 min+" + (picked ? " (" + num(t.picked) + " picked up)" : "") +
+        ". 7 days " + num(w.dials) + " dials, " + num(w.min1) + " of 1 min+" + (picked ? " (" + num(w.picked) + " picked up)" : "");
     };
     const sum = (o) => Object.values(o || {}).reduce((a, v) => a + (v.dials || 0), 0);
     tiles.push({
@@ -109,8 +127,10 @@ function buildTiles(d) {
       href: CRM + "/dialer",
       today: num(sum(C.today)),
       week: num(sum(C.week)),
-      lines: [row("mia", "Mia"), row("people", "Reps"), row("james_login", "James's login"), row("agent", "Other AI callers")],
-      source: "Outbound dials in the CRM dialer log (Mia and people), test calls left out. A talk = a person answered or the call ran 60 s or more. James's login is shared with agents, so it is its own line. Calls from James's mobile are not seen. " + read,
+      todayLabel: "dials today",
+      weekLabel: "dials, 7 days",
+      lines: [row("mia", "Mia", true), row("people", "Reps"), row("james_login", "James's login"), row("agent", "Other AI callers")],
+      source: "Outbound dials in the CRM dialer log, test calls left out. \"1 min+\" = answered and lasted 60 seconds or more, the same ruler for everyone. \"Picked up\" is shown for Mia only: someone answered, even for a few seconds (this is not recorded for people's calls). James's login is shared with agents, so it is its own line. Calls from James's mobile are not seen. " + read,
     });
 
     const B = crm.bookings || {};
@@ -119,16 +139,20 @@ function buildTiles(d) {
       href: CRM + "/calendar",
       today: num(B.ten_today),
       week: num(B.ten_week),
-      lines: [num(B.ten_week_cancelled) + " of the 7-day bookings since cancelled"],
-      source: "Bookings made on the 10-Minute Call calendar (by when they were made), tests and Google mirrors left out. " + read,
+      lines: [
+        "Customers: today " + num(B.ten_today_customers) + ", 7 days " + num(B.ten_week_customers) + " (some booked more than once)",
+        "7-day bookings now: " + num(B.ten_week_showed) + " held, " + num(B.ten_week_no_show) + " no-shows, " + num(B.ten_week_cancelled) + " cancelled, " +
+          num(B.ten_week_upcoming) + " still to come" + (B.ten_week_unmarked ? ", " + num(B.ten_week_unmarked) + " past and not marked" : ""),
+      ],
+      source: "Bookings made on the 10-Minute Call calendar, counted by the day they were made (not the day of the call), tests and Google mirrors left out. " + read,
     });
     tiles.push({
       title: "PV Designs booked",
       href: CRM + "/calendar",
       today: num(B.pv_today),
       week: num(B.pv_week),
-      lines: [num(B.pv_week_cancelled) + " since cancelled", num(B.pv_holds_open) + " upcoming " + plural(B.pv_holds_open, "hold") + " still waiting on a bill (not counted)"],
-      source: "Bookings made on the PV Design calendar, holds left out. " + read,
+      lines: [num(B.pv_week_cancelled) + " of the 7-day bookings since cancelled", num(B.pv_holds_open) + " upcoming " + plural(B.pv_holds_open, "hold") + " still waiting on a bill (not counted)"],
+      source: "Bookings made on the PV Design calendar, counted by the day they were made, holds left out. " + read,
     });
 
     const P = crm.pv_held || {};
@@ -138,23 +162,32 @@ function buildTiles(d) {
       today: num(P.today),
       week: num(P.week),
       tone: P.week_unmarked > 0 ? "warn" : null,
-      lines: [num(P.week_no_show) + " no-shows in 7 days", P.week_unmarked ? num(P.week_unmarked) + " past " + plural(P.week_unmarked, "meeting") + " not marked held or no-show" : null],
-      source: "PV Design meetings marked showed, by start time. " + read,
+      lines: [
+        num(P.upcoming_today) + " still to come today" + (P.upcoming_today_holds ? " (plus " + num(P.upcoming_today_holds) + " " + plural(P.upcoming_today_holds, "hold") + " waiting on a bill)" : ""),
+        num(P.week_no_show) + " no-shows in 7 days",
+        P.week_unmarked ? { text: num(P.week_unmarked) + " past " + plural(P.week_unmarked, "meeting") + " not marked held or no-show", tone: "warn" } : null,
+      ],
+      source: "PV Design meetings marked held (showed), by meeting time. " + read,
     });
 
     const R = crm.proposals || {};
+    const none = R.aged_none || [];
     tiles.push({
       title: "Proposals sent",
       href: CRM + "/pipeline",
       today: num(R.today),
       week: num(R.week),
-      tone: R.aged_untouched > 0 ? "warn" : null,
+      todayLabel: "customers today",
+      weekLabel: "customers, 7 days",
+      tone: none.length > 0 ? "warn" : null,
       lines: [
+        "First proposals: today " + num(R.today_first) + ", 7 days " + num(R.week_first) + ". Re-sends: today " + num((R.today || 0) - (R.today_first || 0)) + ", 7 days " + num((R.week || 0) - (R.week_first || 0)),
         R.aged_sent
-          ? num(R.aged_untouched) + " of " + num(R.aged_sent) + " sent 2 to 9 days ago had no follow-up in their first 48 h"
+          ? "Sent 2 to 9 days ago: " + num(R.aged_sent) + ". " + num(R.aged_touched) + " followed up within 48 h, " + num(R.aged_next_meeting) + " have their next meeting booked" + (R.aged_signed ? ", " + num(R.aged_signed) + " signed" : "")
           : "None sent 2 to 9 days ago to check for follow-up",
+        none.length ? { text: num(none.length) + " with no follow-up of any kind: " + none.join(", "), tone: "warn" } : (R.aged_sent ? "None without follow-up" : null),
       ],
-      source: "CRM sign links sent (one per customer). Follow-up = a rep dial, a call log or a hand-written text or email (Mia and automations left out). James's mobile calls are not seen, so untouched may be too high. " + read,
+      source: "Customers sent a sign link, counted once each. First = their first ever proposal; re-send = they had one before. Followed up = within 48 h a rep dial, call log or hand-written text or email, or a later meeting booked (confirmed or held), or signed. Mia and automatic texts do not count. James's mobile calls are not seen, so a name here may already have had a call. " + read,
     });
 
     const G = crm.signed || {};
@@ -177,9 +210,11 @@ function buildTiles(d) {
       href: SALES + "/installs",
       wide: true,
       today: num(I.open),
-      todayLabel: "open",
+      todayLabel: "open jobs",
+      week: I.customers != null ? num(I.customers) : null,
+      weekLabel: "customers",
       steps: I.steps,
-      source: "Signed jobs not closed or cancelled, at the step the Installs sheet shows (same rule, copied from the CRM code). " + read,
+      source: "Signed jobs not closed or cancelled, at the step the Installs sheet shows (same rule, copied from the CRM code). Some customers have two jobs. Days = how long the job has been at this step. " + read,
     });
 
   // Waiting on James
@@ -187,10 +222,12 @@ function buildTiles(d) {
   const E = d && d.email_drafts;
   const follow = D && D.meeting_follow_up ? D.meeting_follow_up.n : 0;
   const reply = D && D.reply ? D.reply.n : 0;
+  const maybe = D ? Object.values(D).reduce((a, v) => a + (v.maybe_answered || 0), 0) : 0;
   const lines = [];
   if (D) {
     lines.push({ text: num(follow) + " after-meeting follow-up " + plural(follow, "draft") + " to tap" + (follow ? " (oldest " + ageText(D.meeting_follow_up.oldest) + ")" : ""), href: CRM + "/inbox" });
     lines.push({ text: num(reply) + " text reply " + plural(reply, "draft") + " to tap" + (reply ? " (oldest " + ageText(D.reply.oldest) + ")" : ""), href: CRM + "/inbox" });
+    if (maybe) lines.push({ text: "Not counted: " + num(maybe) + " more " + plural(maybe, "draft") + " that may already be answered (someone sent a hand-written message after the draft was made)" });
   } else lines.push({ text: "CRM drafts: not measured (" + (crmErr || "no data") + ")" });
   if (E) lines.push({ text: num(E.n) + " email " + plural(E.n, "draft") + " left in his Gmail to send" + (E.n ? " (oldest " + ageText(E.oldest) + ")" : ""), href: "https://mail.google.com/mail/u/0/#drafts" });
   else lines.push({ text: "Email drafts: not measured (" + ((d && d.email_drafts_error) || "no data") + ")" });
@@ -271,11 +308,14 @@ export function apply(ctx) {
           "div",
           { key: "nums", style: { display: "flex", gap: 22, alignItems: "flex-end", flexWrap: "wrap" } },
           h(Big, { value: t.today, label: t.todayLabel || "today" }),
-          t.week != null ? h(Big, { value: t.week, label: "7 days" }) : null,
+          t.week != null ? h(Big, { value: t.week, label: t.weekLabel || "7 days" }) : null,
         ),
       );
       if (t.steps) body.push(h(StepList, { key: "steps", steps: t.steps }));
-      (t.lines || []).filter(Boolean).forEach((l, i) => body.push(h("div", { key: "l" + i, style: { fontSize: "0.86rem", color: T.subtle, lineHeight: 1.45 } }, l)));
+      (t.lines || []).filter(Boolean).forEach((l, i) => {
+        const line = typeof l === "string" ? { text: l } : l;
+        body.push(h("div", { key: "l" + i, style: { fontSize: "0.86rem", lineHeight: 1.45, color: line.tone === "warn" ? T.warning : T.subtle, fontWeight: line.tone === "warn" ? 600 : 400 } }, line.text));
+      });
       (t.linkLines || []).forEach((l, i) =>
         body.push(
           l.href
